@@ -11,7 +11,13 @@ class $modify(CharFadeInput, CCTextInputNode) {
         std::string prevString;
     };
 
-    static constexpr float kFadeDuration = 0.15f;
+    static float fadeInDuration() {
+        return static_cast<float>(Mod::get()->getSettingValue<double>("fade-in-duration"));
+    }
+
+    static float fadeOutDuration() {
+        return static_cast<float>(Mod::get()->getSettingValue<double>("fade-out-duration"));
+    }
 
     struct Ghost {
         CCTexture2D* tex;
@@ -78,7 +84,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
             if (s[i] == ' ') continue;
             auto sprite = static_cast<CCSprite*>(children->objectAtIndex(childIdx));
             sprite->setOpacity(0);
-            sprite->runAction(CCFadeIn::create(kFadeDuration));
+            sprite->runAction(CCFadeIn::create(fadeInDuration()));
             ++childIdx;
         }
     }
@@ -111,7 +117,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
             parent->addChild(s, zOrder);
             s->runAction(CCSequence::create(
-                CCFadeOut::create(kFadeDuration),
+                CCFadeOut::create(fadeOutDuration()),
                 CCRemoveSelf::create(),
                 nullptr));
         }
