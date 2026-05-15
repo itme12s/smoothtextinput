@@ -11,6 +11,17 @@
 	"version": "v1.0.0",
 	"developer": "imes",
 	"description": "Smooth text input animation.",
+	"links": {
+		"community": "https://discord.gg/E8f6D6XqbW",
+		"source": "https://github.com/ItMe12s/smoothtextinput"
+	},
+	"tags": [
+		"universal",
+		"offline",
+		"enhancement",
+		"interface",
+		"customization"
+	],
 	"dependencies": {
 		"geode.node-ids": ">=v1.23.3"
 	},
