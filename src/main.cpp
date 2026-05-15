@@ -220,6 +220,18 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         CCTextInputNode::refreshLabel();
 
+        if (m_textLabel) {
+            if (auto children = m_textLabel->getChildren()) {
+                GLubyte fullOp = m_textLabel->getOpacity();
+                for (unsigned int j = 0; j < children->count(); ++j) {
+                    if (auto sp = typeinfo_cast<CCSprite*>(children->objectAtIndex(j))) {
+                        sp->stopActionByTag(kFadeInTag);
+                        sp->setOpacity(fullOp);
+                    }
+                }
+            }
+        }
+
         oldStr = std::move(newStr);
 
         fadeInRange(newStart, newEnd);
