@@ -85,19 +85,31 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
     void fadeOutGhosts(std::vector<Ghost> const& ghosts) {
         if (ghosts.empty() || !m_textLabel) return;
+        auto parent = m_textLabel->getParent();
+        if (!parent) return;
+
+        float lblScaleX = m_textLabel->getScaleX();
+        float lblScaleY = m_textLabel->getScaleY();
+        float lblRot    = m_textLabel->getRotation();
+        int   zOrder    = m_textLabel->getZOrder();
 
         for (auto const& g : ghosts) {
             if (!g.tex) continue;
             auto s = CCSprite::createWithTexture(g.tex, g.rect);
             if (!s) continue;
-            s->setPosition(g.pos);
+
+            CCPoint world = m_textLabel->convertToWorldSpace(g.pos);
+            CCPoint local = parent->convertToNodeSpace(world);
+
+            s->setPosition(local);
             s->setAnchorPoint(g.anchor);
-            s->setScaleX(g.scaleX);
-            s->setScaleY(g.scaleY);
-            s->setRotation(g.rotation);
+            s->setScaleX(g.scaleX * lblScaleX);
+            s->setScaleY(g.scaleY * lblScaleY);
+            s->setRotation(g.rotation + lblRot);
             s->setColor(g.color);
             s->setOpacity(g.opacity);
-            m_textLabel->addChild(s);
+
+            parent->addChild(s, zOrder);
             s->runAction(CCSequence::create(
                 CCFadeOut::create(kFadeDuration),
                 CCRemoveSelf::create(),
