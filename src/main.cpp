@@ -2,6 +2,7 @@
 #include <Geode/modify/CCTextInputNode.hpp>
 #include <algorithm>
 #include <string>
+#include <vector>
 
 using namespace geode::prelude;
 
@@ -12,13 +13,106 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
     static constexpr float kFadeDuration = 0.15f;
 
-    void refreshLabel() {
-        CCTextInputNode::refreshLabel();
+    struct Ghost {
+        CCTexture2D* tex;
+        CCRect rect;
+        CCPoint pos;
+        CCPoint anchor;
+        float scaleX;
+        float scaleY;
+        float rotation;
+        ccColor3B color;
+        GLubyte opacity;
+    };
 
+    static int charIndexToChildIndex(std::string const& s, size_t charPos) {
+        return static_cast<int>(
+            std::count_if(s.begin(), s.begin() + charPos, [](char c) { return c != ' '; }));
+    }
+
+    std::vector<Ghost> snapshotRange(size_t start, size_t end) {
+        std::vector<Ghost> out;
+        if (start >= end || !m_textLabel) return out;
+
+        auto children = m_textLabel->getChildren();
+        if (!children || children->count() == 0) return out;
+        int childCount = children->count();
+
+        auto const& s = m_fields->prevString;
+        int childIdx = charIndexToChildIndex(s, start);
+
+        for (size_t i = start; i < end && childIdx < childCount; ++i) {
+            if (s[i] == ' ') continue;
+            auto sprite = typeinfo_cast<CCSprite*>(children->objectAtIndex(childIdx));
+            if (sprite) {
+                out.push_back({
+                    sprite->getTexture(),
+                    sprite->getTextureRect(),
+                    sprite->getPosition(),
+                    sprite->getAnchorPoint(),
+                    sprite->getScaleX(),
+                    sprite->getScaleY(),
+                    sprite->getRotation(),
+                    sprite->getColor(),
+                    sprite->getOpacity(),
+                });
+            }
+            ++childIdx;
+        }
+        return out;
+    }
+
+    void fadeInRange(size_t start, size_t end) {
+        if (start >= end || !m_textLabel) return;
+
+        auto children = m_textLabel->getChildren();
+        if (!children || children->count() == 0) return;
+        int childCount = children->count();
+
+        if (!typeinfo_cast<CCSprite*>(children->objectAtIndex(0))) return;
+
+        auto const& s = m_fields->prevString;
+        int childIdx = charIndexToChildIndex(s, start);
+
+        for (size_t i = start; i < end && childIdx < childCount; ++i) {
+            if (s[i] == ' ') continue;
+            auto sprite = static_cast<CCSprite*>(children->objectAtIndex(childIdx));
+            sprite->setOpacity(0);
+            sprite->runAction(CCFadeIn::create(kFadeDuration));
+            ++childIdx;
+        }
+    }
+
+    void fadeOutGhosts(std::vector<Ghost> const& ghosts) {
+        if (ghosts.empty() || !m_textLabel) return;
+
+        for (auto const& g : ghosts) {
+            if (!g.tex) continue;
+            auto s = CCSprite::createWithTexture(g.tex, g.rect);
+            if (!s) continue;
+            s->setPosition(g.pos);
+            s->setAnchorPoint(g.anchor);
+            s->setScaleX(g.scaleX);
+            s->setScaleY(g.scaleY);
+            s->setRotation(g.rotation);
+            s->setColor(g.color);
+            s->setOpacity(g.opacity);
+            m_textLabel->addChild(s);
+            s->runAction(CCSequence::create(
+                CCFadeOut::create(kFadeDuration),
+                CCRemoveSelf::create(),
+                nullptr));
+        }
+    }
+
+    void refreshLabel() {
         std::string newStr = m_textField->getString();
         auto& oldStr = m_fields->prevString;
 
-        if (oldStr == newStr) return;
+        if (oldStr == newStr) {
+            CCTextInputNode::refreshLabel();
+            return;
+        }
 
         auto [oIt, nIt] = std::mismatch(oldStr.begin(), oldStr.end(), newStr.begin(), newStr.end());
         size_t p = static_cast<size_t>(nIt - newStr.begin());
@@ -30,27 +124,16 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         size_t newStart = p;
         size_t newEnd = newStr.size() - s;
+        size_t oldStart = p;
+        size_t oldEnd = oldStr.size() - s;
+
+        auto ghosts = snapshotRange(oldStart, oldEnd);
+
+        CCTextInputNode::refreshLabel();
 
         oldStr = std::move(newStr);
 
-        if (newStart >= newEnd || !m_textLabel) return;
-
-        auto children = m_textLabel->getChildren();
-        if (!children || children->count() == 0) return;
-        int childCount = children->count();
-
-        if (!typeinfo_cast<CCSprite*>(children->objectAtIndex(0))) return;
-
-        auto const& s2 = m_fields->prevString;
-        int childIdx = static_cast<int>(
-            std::count_if(s2.begin(), s2.begin() + newStart, [](char c) { return c != ' '; }));
-
-        for (size_t i = newStart; i < newEnd && childIdx < childCount; ++i) {
-            if (s2[i] == ' ') continue;
-            auto sprite = static_cast<CCSprite*>(children->objectAtIndex(childIdx));
-            sprite->setOpacity(0);
-            sprite->runAction(CCFadeIn::create(kFadeDuration));
-            ++childIdx;
-        }
+        fadeInRange(newStart, newEnd);
+        fadeOutGhosts(ghosts);
     }
 };
