@@ -26,6 +26,10 @@
 		"geode.node-ids": ">=v1.23.3"
 	},
 	"settings": {
+		"title-duration": {
+			"type": "title",
+			"name": "Duration"
+		},
 		"fade-in-duration": {
 			"type": "float",
 			"default": 0.15,
@@ -49,6 +53,10 @@
 				"slider": true,
 				"slider-step": 0.01
 			}
+		},
+		"title-pop-in": {
+			"type": "title",
+			"name": "Pop In"
 		},
 		"pop-in-enabled": {
 			"type": "bool",
@@ -91,6 +99,10 @@
 			"default": false,
 			"name": "Randomize Pop In Distance",
 			"description": "Random distance from 0 to 50 per character on fade-in (ignores distance slider)."
+		},
+		"title-pop-out": {
+			"type": "title",
+			"name": "Pop Out"
 		},
 		"pop-out-enabled": {
 			"type": "bool",
