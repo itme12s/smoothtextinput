@@ -1,13 +1,10 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
-#include <Geode/ui/Popup.hpp>
 #include <algorithm>
 #include <string>
 #include <vector>
 
 using namespace geode::prelude;
-
-class ModSettingsPopup : public geode::Popup {};
 
 class $modify(CharFadeInput, CCTextInputNode) {
     struct Fields {
@@ -127,7 +124,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
     }
 
     void refreshLabel() {
-        if (CCScene::get() && CCScene::get()->getChildByType<ModSettingsPopup>(0)) {
+        if (!m_selected) {
             CCTextInputNode::refreshLabel();
             m_fields->prevString = m_textField->getString();
             return;
