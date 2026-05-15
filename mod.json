@@ -79,7 +79,7 @@
 			"type": "bool",
 			"default": false,
 			"name": "Randomize Pop In Distance",
-			"description": "Random distance from 0 to max per character on fade-in."
+			"description": "Random distance from 0 to 50 per character on fade-in (ignores distance slider)."
 		},
 		"pop-out-enabled": {
 			"type": "bool",
@@ -121,7 +121,7 @@
 			"type": "bool",
 			"default": false,
 			"name": "Randomize Pop Out Distance",
-			"description": "Random distance from 0 to max per character on fade-out."
+			"description": "Random distance from 0 to 50 per character on fade-out (ignores distance slider)."
 		}
 	}
 }

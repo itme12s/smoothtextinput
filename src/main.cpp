@@ -1,83 +1,18 @@
+#include "main.hpp"
+
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
-#include <Geode/utils/random.hpp>
 #include <algorithm>
-#include <cmath>
 #include <string>
 #include <vector>
 
 using namespace geode::prelude;
+using namespace smoothtextinput;
 
 class $modify(CharFadeInput, CCTextInputNode) {
     struct Fields {
         std::string prevString;
     };
-
-    static float fadeInDuration() {
-        return static_cast<float>(Mod::get()->getSettingValue<double>("fade-in-duration"));
-    }
-
-    static float fadeOutDuration() {
-        return static_cast<float>(Mod::get()->getSettingValue<double>("fade-out-duration"));
-    }
-
-    struct PopSettings {
-        bool enabled;
-        int angle;
-        bool randomAngle;
-        float distance;
-        bool randomDistance;
-    };
-
-    static PopSettings popInSettings() {
-        auto mod = Mod::get();
-        return {
-            mod->getSettingValue<bool>("pop-in-enabled"),
-            static_cast<int>(mod->getSettingValue<int64_t>("pop-in-angle")),
-            mod->getSettingValue<bool>("pop-in-angle-random"),
-            static_cast<float>(mod->getSettingValue<double>("pop-in-distance")),
-            mod->getSettingValue<bool>("pop-in-distance-random"),
-        };
-    }
-
-    static PopSettings popOutSettings() {
-        auto mod = Mod::get();
-        return {
-            mod->getSettingValue<bool>("pop-out-enabled"),
-            static_cast<int>(mod->getSettingValue<int64_t>("pop-out-angle")),
-            mod->getSettingValue<bool>("pop-out-angle-random"),
-            static_cast<float>(mod->getSettingValue<double>("pop-out-distance")),
-            mod->getSettingValue<bool>("pop-out-distance-random"),
-        };
-    }
-
-    // Motion vector, angle 0 = up.
-    static CCPoint popMotion(float angleDeg, float distance) {
-        float r = angleDeg * M_PI / 180.0f; // I'm sorry dankmeme, you're right.
-        return CCPoint(std::sin(r) * distance, std::cos(r) * distance);
-    }
-
-    static constexpr float kDistanceMax = 50.0f;
-
-    static void resolvePop(PopSettings const& settings, float& outAngle, float& outDist) {
-        if (!settings.enabled) { outAngle = 0.0f; outDist = 0.0f; return; }
-        outAngle = settings.randomAngle ? utils::random::generate<float>(0.0f, 360.0f) : static_cast<float>(settings.angle);
-        outDist  = settings.randomDistance ? utils::random::generate<float>(0.0f, kDistanceMax) : settings.distance;
-    }
-
-    struct Ghost {
-        CCTexture2D* tex;
-        CCRect rect;
-        CCPoint pos;
-        CCPoint anchor;
-        float scaleX;
-        float scaleY;
-        float rotation;
-        ccColor3B color;
-        GLubyte opacity;
-    };
-
-    static constexpr int kFadeInTag = 0x7AD0;
 
     std::vector<Ghost> snapshotRange(size_t start, size_t end) {
         std::vector<Ghost> out;
@@ -203,6 +138,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
             return;
         }
 
+        // Find changed span between old and new strings.
         auto [oIt, nIt] = std::mismatch(oldStr.begin(), oldStr.end(), newStr.begin(), newStr.end());
         size_t p = static_cast<size_t>(nIt - newStr.begin());
 
@@ -212,14 +148,16 @@ class $modify(CharFadeInput, CCTextInputNode) {
         size_t s = static_cast<size_t>(nRIt - newStr.rbegin());
 
         size_t newStart = p;
-        size_t newEnd = newStr.size() - s;
+        size_t newEnd   = newStr.size() - s;
         size_t oldStart = p;
-        size_t oldEnd = oldStr.size() - s;
+        size_t oldEnd   = oldStr.size() - s;
 
         auto ghosts = snapshotRange(oldStart, oldEnd);
 
         CCTextInputNode::refreshLabel();
 
+        // Cancel any in-flight fade-ins so existing chars stay solid.
+        // I'll find a way to workaround this later.
         if (m_textLabel) {
             if (auto children = m_textLabel->getChildren()) {
                 GLubyte fullOp = m_textLabel->getOpacity();
