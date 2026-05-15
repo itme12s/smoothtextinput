@@ -1,8 +1,14 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
 #include <algorithm>
+#include <cmath>
+#include <random>
 #include <string>
 #include <vector>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 using namespace geode::prelude;
 
@@ -17,6 +23,37 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
     static float fadeOutDuration() {
         return static_cast<float>(Mod::get()->getSettingValue<double>("fade-out-duration"));
+    }
+
+    static bool  popInEnabled()        { return Mod::get()->getSettingValue<bool>("pop-in-enabled"); }
+    static int   popInAngle()          { return static_cast<int>(Mod::get()->getSettingValue<int64_t>("pop-in-angle")); }
+    static bool  popInAngleRandom()    { return Mod::get()->getSettingValue<bool>("pop-in-angle-random"); }
+    static float popInDistance()       { return static_cast<float>(Mod::get()->getSettingValue<double>("pop-in-distance")); }
+    static bool  popInDistanceRandom() { return Mod::get()->getSettingValue<bool>("pop-in-distance-random"); }
+
+    static bool  popOutEnabled()        { return Mod::get()->getSettingValue<bool>("pop-out-enabled"); }
+    static int   popOutAngle()          { return static_cast<int>(Mod::get()->getSettingValue<int64_t>("pop-out-angle")); }
+    static bool  popOutAngleRandom()    { return Mod::get()->getSettingValue<bool>("pop-out-angle-random"); }
+    static float popOutDistance()       { return static_cast<float>(Mod::get()->getSettingValue<double>("pop-out-distance")); }
+    static bool  popOutDistanceRandom() { return Mod::get()->getSettingValue<bool>("pop-out-distance-random"); }
+
+    // Motion vector: angle 0 = up. Sprite travels in this direction during the animation.
+    static CCPoint popMotion(float angleDeg, float distance) {
+        float r = angleDeg * static_cast<float>(M_PI) / 180.0f;
+        return CCPoint(std::sin(r) * distance, std::cos(r) * distance);
+    }
+
+    static float frand01() {
+        static thread_local std::mt19937 rng{std::random_device{}()};
+        return std::uniform_real_distribution<float>(0.0f, 1.0f)(rng);
+    }
+
+    static constexpr float kDistanceMax = 50.0f;
+
+    static void resolvePop(bool enabled, int angleSetting, bool angleRandom, float distSetting, bool distRandom, float& outAngle, float& outDist) {
+        if (!enabled) { outAngle = 0.0f; outDist = 0.0f; return; }
+        outAngle = angleRandom ? frand01() * 360.0f : static_cast<float>(angleSetting);
+        outDist  = distRandom  ? frand01() * kDistanceMax : distSetting;
     }
 
     struct Ghost {
@@ -80,11 +117,32 @@ class $modify(CharFadeInput, CCTextInputNode) {
         auto const& s = m_fields->prevString;
         int childIdx = charIndexToChildIndex(s, start);
 
+        float dur = fadeInDuration();
+        bool  pop = popInEnabled();
+        int   angleSetting = popInAngle();
+        bool  angleRand    = popInAngleRandom();
+        float distSetting  = popInDistance();
+        bool  distRand     = popInDistanceRandom();
+
         for (size_t i = start; i < end && childIdx < childCount; ++i) {
             if (s[i] == ' ') continue;
             auto sprite = static_cast<CCSprite*>(children->objectAtIndex(childIdx));
             sprite->setOpacity(0);
-            sprite->runAction(CCFadeIn::create(fadeInDuration()));
+
+            float angle, dist;
+            resolvePop(pop, angleSetting, angleRand, distSetting, distRand, angle, dist);
+
+            if (dist > 0.0f) {
+                CCPoint finalPos = sprite->getPosition();
+                CCPoint motion = popMotion(angle, dist);
+                sprite->setPosition(finalPos - motion);
+                sprite->runAction(CCSpawn::create(
+                    CCFadeIn::create(dur),
+                    CCMoveTo::create(dur, finalPos),
+                    nullptr));
+            } else {
+                sprite->runAction(CCFadeIn::create(dur));
+            }
             ++childIdx;
         }
     }
@@ -98,6 +156,13 @@ class $modify(CharFadeInput, CCTextInputNode) {
         float lblScaleY = m_textLabel->getScaleY();
         float lblRot    = m_textLabel->getRotation();
         int   zOrder    = m_textLabel->getZOrder();
+
+        float dur = fadeOutDuration();
+        bool  pop = popOutEnabled();
+        int   angleSetting = popOutAngle();
+        bool  angleRand    = popOutAngleRandom();
+        float distSetting  = popOutDistance();
+        bool  distRand     = popOutDistanceRandom();
 
         for (auto const& g : ghosts) {
             if (!g.tex) continue;
@@ -116,10 +181,24 @@ class $modify(CharFadeInput, CCTextInputNode) {
             s->setOpacity(g.opacity);
 
             parent->addChild(s, zOrder);
-            s->runAction(CCSequence::create(
-                CCFadeOut::create(fadeOutDuration()),
-                CCRemoveSelf::create(),
-                nullptr));
+
+            float angle, dist;
+            resolvePop(pop, angleSetting, angleRand, distSetting, distRand, angle, dist);
+
+            if (dist > 0.0f) {
+                s->runAction(CCSequence::create(
+                    CCSpawn::create(
+                        CCFadeOut::create(dur),
+                        CCMoveBy::create(dur, popMotion(angle, dist)),
+                        nullptr),
+                    CCRemoveSelf::create(),
+                    nullptr));
+            } else {
+                s->runAction(CCSequence::create(
+                    CCFadeOut::create(dur),
+                    CCRemoveSelf::create(),
+                    nullptr));
+            }
         }
     }
 
