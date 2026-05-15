@@ -53,7 +53,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
     // Motion vector, angle 0 = up.
     static CCPoint popMotion(float angleDeg, float distance) {
-        float r = angleDeg * M_PI / 180.0f;
+        float r = angleDeg * M_PI / 180.0f; // I'm sorry dankmeme, you're right.
         return CCPoint(std::sin(r) * distance, std::cos(r) * distance);
     }
 
@@ -77,40 +77,28 @@ class $modify(CharFadeInput, CCTextInputNode) {
         GLubyte opacity;
     };
 
-    static int charIndexToChildIndex(std::string const& s, size_t charPos) {
-        return static_cast<int>(
-            std::count_if(s.begin(), s.begin() + charPos, [](char c) { return c != ' '; }));
-    }
+    static constexpr int kFadeInTag = 0x7AD0;
 
     std::vector<Ghost> snapshotRange(size_t start, size_t end) {
         std::vector<Ghost> out;
         if (start >= end || !m_textLabel) return out;
         out.reserve(end - start);
 
-        auto children = m_textLabel->getChildren();
-        if (!children || children->count() == 0) return out;
-        int childCount = children->count();
-
-        auto const& s = m_fields->prevString;
-        int childIdx = charIndexToChildIndex(s, start);
-
-        for (size_t i = start; i < end && childIdx < childCount; ++i) {
-            if (s[i] == ' ') continue;
-            auto sprite = typeinfo_cast<CCSprite*>(children->objectAtIndex(childIdx));
-            if (sprite) {
-                out.push_back({
-                    sprite->getTexture(),
-                    sprite->getTextureRect(),
-                    sprite->getPosition(),
-                    sprite->getAnchorPoint(),
-                    sprite->getScaleX(),
-                    sprite->getScaleY(),
-                    sprite->getRotation(),
-                    sprite->getColor(),
-                    sprite->getOpacity(),
-                });
-            }
-            ++childIdx;
+        for (size_t i = start; i < end; ++i) {
+            auto sprite = typeinfo_cast<CCSprite*>(
+                m_textLabel->getChildByTag(static_cast<int>(i)));
+            if (!sprite) continue;
+            out.push_back({
+                sprite->getTexture(),
+                sprite->getTextureRect(),
+                sprite->getPosition(),
+                sprite->getAnchorPoint(),
+                sprite->getScaleX(),
+                sprite->getScaleY(),
+                sprite->getRotation(),
+                sprite->getColor(),
+                sprite->getOpacity(),
+            });
         }
         return out;
     }
@@ -118,38 +106,34 @@ class $modify(CharFadeInput, CCTextInputNode) {
     void fadeInRange(size_t start, size_t end) {
         if (start >= end || !m_textLabel) return;
 
-        auto children = m_textLabel->getChildren();
-        if (!children || children->count() == 0) return;
-        int childCount = children->count();
-
-        if (!typeinfo_cast<CCSprite*>(children->objectAtIndex(0))) return;
-
-        auto const& s = m_fields->prevString;
-        int childIdx = charIndexToChildIndex(s, start);
-
         float dur = fadeInDuration();
         auto popSettings = popInSettings();
 
-        for (size_t i = start; i < end && childIdx < childCount; ++i) {
-            if (s[i] == ' ') continue;
-            auto sprite = static_cast<CCSprite*>(children->objectAtIndex(childIdx));
+        for (size_t i = start; i < end; ++i) {
+            auto sprite = typeinfo_cast<CCSprite*>(
+                m_textLabel->getChildByTag(static_cast<int>(i)));
+            if (!sprite) continue;
+
+            sprite->stopActionByTag(kFadeInTag);
             sprite->setOpacity(0);
 
             float angle, dist;
             resolvePop(popSettings, angle, dist);
 
+            CCAction* action;
             if (dist > 0.0f) {
                 CCPoint finalPos = sprite->getPosition();
                 CCPoint motion = popMotion(angle, dist);
                 sprite->setPosition(finalPos - motion);
-                sprite->runAction(CCSpawn::create(
+                action = CCSpawn::create(
                     CCFadeIn::create(dur),
                     CCMoveTo::create(dur, finalPos),
-                    nullptr));
+                    nullptr);
             } else {
-                sprite->runAction(CCFadeIn::create(dur));
+                action = CCFadeIn::create(dur);
             }
-            ++childIdx;
+            action->setTag(kFadeInTag);
+            sprite->runAction(action);
         }
     }
 
