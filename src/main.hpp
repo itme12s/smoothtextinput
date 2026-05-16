@@ -2,12 +2,14 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/utils/random.hpp>
+#include <chrono>
 #include <cmath>
 
 namespace smoothtextinput {
 
 constexpr float kDistanceMax = 50.0f;
 constexpr int   kFadeInTag   = 0x7AD0;
+constexpr int   kGhostTag    = 0x7AD1;
 
 struct PopSettings {
     bool  enabled;
@@ -27,6 +29,12 @@ struct Ghost {
     float                 rotation;
     cocos2d::ccColor3B    color;
     GLubyte               opacity;
+};
+
+struct PendingFade {
+    std::chrono::steady_clock::time_point startTime;
+    float                                 duration;
+    cocos2d::CCPoint                      motion;
 };
 
 inline float fadeInDuration() {

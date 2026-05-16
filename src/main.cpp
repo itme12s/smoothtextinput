@@ -3,6 +3,8 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
 #include <algorithm>
+#include <chrono>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -12,18 +14,26 @@ using namespace smoothtextinput;
 class $modify(CharFadeInput, CCTextInputNode) {
     struct Fields {
         std::string prevString;
+        std::vector<Ghost> prevLabel;
+        std::vector<std::optional<PendingFade>> pending;
+        bool externalUpdate = false;
     };
 
-    std::vector<Ghost> snapshotRange(size_t start, size_t end) {
-        std::vector<Ghost> out;
-        if (start >= end || !m_textLabel) return out;
-        out.reserve(end - start);
-
-        for (size_t i = start; i < end; ++i) {
+    void captureLabelSnapshot() {
+        auto& prev = m_fields->prevLabel;
+        prev.clear();
+        if (!m_textLabel) return;
+        GLubyte fullOp = m_textLabel->getOpacity();
+        size_t len = m_fields->prevString.size();
+        prev.reserve(len);
+        for (size_t i = 0; i < len; ++i) {
             auto sprite = typeinfo_cast<CCSprite*>(
                 m_textLabel->getChildByTag(static_cast<int>(i)));
-            if (!sprite) continue;
-            out.push_back({
+            if (!sprite) {
+                prev.push_back({});
+                continue;
+            }
+            prev.push_back({
                 sprite->getTexture(),
                 sprite->getTextureRect(),
                 sprite->getPosition(),
@@ -32,10 +42,30 @@ class $modify(CharFadeInput, CCTextInputNode) {
                 sprite->getScaleY(),
                 sprite->getRotation(),
                 sprite->getColor(),
-                sprite->getOpacity(),
+                fullOp,
             });
         }
-        return out;
+    }
+
+    void plainRefresh() {
+        CCTextInputNode::refreshLabel();
+        m_fields->prevString = m_textField->getString();
+        m_fields->pending.clear();
+        captureLabelSnapshot();
+    }
+
+    void purgeGhosts() {
+        if (!m_textLabel) return;
+        auto parent = m_textLabel->getParent();
+        if (!parent) return;
+        auto children = parent->getChildren();
+        if (!children) return;
+        std::vector<CCNode*> toRemove;
+        for (unsigned int j = 0; j < children->count(); ++j) {
+            auto node = typeinfo_cast<CCNode*>(children->objectAtIndex(j));
+            if (node && node->getTag() == kGhostTag) toRemove.push_back(node);
+        }
+        for (auto n : toRemove) n->removeFromParent();
     }
 
     void fadeInRange(size_t start, size_t end) {
@@ -43,6 +73,9 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         float dur = fadeInDuration();
         auto popSettings = popInSettings();
+        auto now = std::chrono::steady_clock::now();
+
+        if (m_fields->pending.size() < end) m_fields->pending.resize(end);
 
         for (size_t i = start; i < end; ++i) {
             auto sprite = typeinfo_cast<CCSprite*>(
@@ -55,10 +88,11 @@ class $modify(CharFadeInput, CCTextInputNode) {
             float angle, dist;
             resolvePop(popSettings, angle, dist);
 
+            CCPoint motion(0, 0);
             CCAction* action;
             if (dist > 0.0f) {
                 CCPoint finalPos = sprite->getPosition();
-                CCPoint motion = popMotion(angle, dist);
+                motion = popMotion(angle, dist);
                 sprite->setPosition(finalPos - motion);
                 action = CCSpawn::create(
                     CCFadeIn::create(dur),
@@ -69,7 +103,45 @@ class $modify(CharFadeInput, CCTextInputNode) {
             }
             action->setTag(kFadeInTag);
             sprite->runAction(action);
+
+            m_fields->pending[i] = PendingFade{now, dur, motion};
         }
+    }
+
+    void continueFade(size_t idx) {
+        if (!m_textLabel || idx >= m_fields->pending.size()) return;
+        auto& slot = m_fields->pending[idx];
+        if (!slot) return;
+
+        auto sprite = typeinfo_cast<CCSprite*>(
+            m_textLabel->getChildByTag(static_cast<int>(idx)));
+        if (!sprite) { slot = std::nullopt; return; }
+
+        float elapsed = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - slot->startTime).count();
+        if (elapsed >= slot->duration) { slot = std::nullopt; return; }
+
+        float remaining = slot->duration - elapsed;
+        float ratio = elapsed / slot->duration;
+        GLubyte fullOp = m_textLabel->getOpacity();
+
+        sprite->stopActionByTag(kFadeInTag);
+        sprite->setOpacity(static_cast<GLubyte>(ratio * fullOp));
+
+        CCAction* action;
+        if (slot->motion.x != 0.0f || slot->motion.y != 0.0f) {
+            CCPoint finalPos = sprite->getPosition();
+            CCPoint offset = slot->motion * (1.0f - ratio);
+            sprite->setPosition(finalPos - offset);
+            action = CCSpawn::create(
+                CCFadeTo::create(remaining, fullOp),
+                CCMoveTo::create(remaining, finalPos),
+                nullptr);
+        } else {
+            action = CCFadeTo::create(remaining, fullOp);
+        }
+        action->setTag(kFadeInTag);
+        sprite->runAction(action);
     }
 
     void fadeOutGhosts(std::vector<Ghost> const& ghosts) {
@@ -91,9 +163,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
             if (!s) continue;
 
             CCPoint world = m_textLabel->convertToWorldSpace(g.pos);
-            CCPoint local = parent->convertToNodeSpace(world);
-
-            s->setPosition(local);
+            s->setPosition(parent->convertToNodeSpace(world));
             s->setAnchorPoint(g.anchor);
             s->setScaleX(g.scaleX * lblScaleX);
             s->setScaleY(g.scaleY * lblScaleY);
@@ -102,31 +172,36 @@ class $modify(CharFadeInput, CCTextInputNode) {
             s->setOpacity(g.opacity);
 
             parent->addChild(s, zOrder);
+            s->setTag(kGhostTag);
 
             float angle, dist;
             resolvePop(popSettings, angle, dist);
 
-            if (dist > 0.0f) {
-                s->runAction(CCSequence::create(
-                    CCSpawn::create(
-                        CCFadeOut::create(dur),
-                        CCMoveBy::create(dur, popMotion(angle, dist)),
-                        nullptr),
-                    CCRemoveSelf::create(),
-                    nullptr));
-            } else {
-                s->runAction(CCSequence::create(
+            CCActionInterval* fade = (dist > 0.0f)
+                ? static_cast<CCActionInterval*>(CCSpawn::create(
                     CCFadeOut::create(dur),
-                    CCRemoveSelf::create(),
-                    nullptr));
-            }
+                    CCMoveBy::create(dur, popMotion(angle, dist)),
+                    nullptr))
+                : static_cast<CCActionInterval*>(CCFadeOut::create(dur));
+            s->runAction(CCSequence::create(fade, CCRemoveSelf::create(), nullptr));
         }
     }
 
+    void setString(gd::string text) {
+        m_fields->externalUpdate = true;
+        CCTextInputNode::setString(text);
+        m_fields->externalUpdate = false;
+    }
+
     void refreshLabel() {
+        if (m_fields->externalUpdate) {
+            purgeGhosts();
+            plainRefresh();
+            return;
+        }
+
         if (!m_selected) {
-            CCTextInputNode::refreshLabel();
-            m_fields->prevString = m_textField->getString();
+            plainRefresh();
             return;
         }
 
@@ -135,44 +210,52 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         if (oldStr == newStr) {
             CCTextInputNode::refreshLabel();
+            for (size_t i = 0; i < m_fields->pending.size(); ++i) continueFade(i);
+            captureLabelSnapshot();
             return;
         }
 
-        // Find changed span between old and new strings.
         auto [oIt, nIt] = std::mismatch(oldStr.begin(), oldStr.end(), newStr.begin(), newStr.end());
         size_t p = static_cast<size_t>(nIt - newStr.begin());
 
-        auto oRStop = oldStr.rend() - p;
-        auto nRStop = newStr.rend() - p;
-        auto [oRIt, nRIt] = std::mismatch(oldStr.rbegin(), oRStop, newStr.rbegin(), nRStop);
+        auto [oRIt, nRIt] = std::mismatch(
+            oldStr.rbegin(), oldStr.rend() - p,
+            newStr.rbegin(), newStr.rend() - p);
         size_t s = static_cast<size_t>(nRIt - newStr.rbegin());
 
-        size_t newStart = p;
-        size_t newEnd   = newStr.size() - s;
-        size_t oldStart = p;
-        size_t oldEnd   = oldStr.size() - s;
+        size_t newStart = p, newEnd = newStr.size() - s;
+        size_t oldStart = p, oldEnd = oldStr.size() - s;
+        size_t newLen = newStr.size();
 
-        auto ghosts = snapshotRange(oldStart, oldEnd);
-
-        CCTextInputNode::refreshLabel();
-
-        // Cancel any in-flight fade-ins so existing chars stay solid.
-        // I'll find a way to workaround this later.
-        if (m_textLabel) {
-            if (auto children = m_textLabel->getChildren()) {
-                GLubyte fullOp = m_textLabel->getOpacity();
-                for (unsigned int j = 0; j < children->count(); ++j) {
-                    if (auto sp = typeinfo_cast<CCSprite*>(children->objectAtIndex(j))) {
-                        sp->stopActionByTag(kFadeInTag);
-                        sp->setOpacity(fullOp);
-                    }
-                }
-            }
+        std::vector<Ghost> ghosts;
+        if (oldStart < oldEnd) {
+            ghosts.reserve(oldEnd - oldStart);
+            for (size_t i = oldStart; i < oldEnd && i < m_fields->prevLabel.size(); ++i)
+                ghosts.push_back(m_fields->prevLabel[i]);
         }
 
+        // Remap pending fades from old indices to new indices.
+        std::vector<std::optional<PendingFade>> remapped(newLen);
+        auto& oldPending = m_fields->pending;
+        for (size_t i = 0; i < newStart && i < oldPending.size(); ++i)
+            remapped[i] = oldPending[i];
+        for (size_t i = newEnd; i < newLen; ++i) {
+            size_t oldIdx = (newEnd >= oldEnd)
+                ? i - (newEnd - oldEnd)
+                : i + (oldEnd - newEnd);
+            if (oldIdx < oldPending.size()) remapped[i] = oldPending[oldIdx];
+        }
+        m_fields->pending = std::move(remapped);
+
+        CCTextInputNode::refreshLabel();
         oldStr = std::move(newStr);
+
+        for (size_t i = 0; i < newStart; ++i) continueFade(i);
+        for (size_t i = newEnd; i < newLen; ++i) continueFade(i);
 
         fadeInRange(newStart, newEnd);
         fadeOutGhosts(ghosts);
+
+        captureLabelSnapshot();
     }
 };
