@@ -2,6 +2,7 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
+#include <Geode/ui/Popup.hpp>
 #include <algorithm>
 #include <chrono>
 #include <optional>
@@ -10,6 +11,8 @@
 
 using namespace geode::prelude;
 using namespace smoothtextinput;
+
+class ModSettingsPopup : public geode::Popup {};
 
 class $modify(CharFadeInput, CCTextInputNode) {
     struct Fields {
@@ -201,6 +204,12 @@ class $modify(CharFadeInput, CCTextInputNode) {
         }
 
         if (!m_selected) {
+            plainRefresh();
+            return;
+        }
+
+        if (auto scene = CCScene::get(); scene && scene->getChildByType<ModSettingsPopup>(0)) {
+            purgeGhosts();
             plainRefresh();
             return;
         }
