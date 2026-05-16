@@ -2,6 +2,8 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/CCTextInputNode.hpp>
+#include <Geode/binding/MultilineBitmapFont.hpp>
+#include <Geode/binding/TextArea.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <algorithm>
 #include <chrono>
@@ -22,24 +24,72 @@ class $modify(CharFadeInput, CCTextInputNode) {
         bool externalUpdate = false;
     };
 
+    CCNode* activeLabel() {
+        if (m_textArea && m_textArea->m_label) return m_textArea->m_label;
+        return m_textLabel;
+    }
+
+    GLubyte activeLabelOpacity() {
+        if (m_textArea && m_textArea->m_label) return m_textArea->m_label->getOpacity();
+        return m_textLabel ? m_textLabel->getOpacity() : 255;
+    }
+
+    CCSprite* glyphAtRawIndex(std::string const& text, size_t rawIndex) {
+        if (rawIndex >= text.size()) return nullptr;
+
+        if (m_textArea && m_textArea->m_label) {
+            if (text[rawIndex] == '\n' || text[rawIndex] == '\r') return nullptr;
+
+            auto chars = m_textArea->m_label->m_characters;
+            if (!chars) return nullptr;
+
+            size_t glyphIndex = 0;
+            for (size_t i = 0; i < rawIndex; ++i) {
+                if (text[i] != '\n' && text[i] != '\r') ++glyphIndex;
+            }
+            if (glyphIndex >= chars->count()) return nullptr;
+
+            return typeinfo_cast<CCSprite*>(chars->objectAtIndex(static_cast<unsigned int>(glyphIndex)));
+        }
+
+        if (!m_textLabel) return nullptr;
+        return typeinfo_cast<CCSprite*>(m_textLabel->getChildByTag(static_cast<int>(rawIndex)));
+    }
+
+    void purgeGhostsFromParent(CCNode* parent) {
+        if (!parent) return;
+        auto children = parent->getChildren();
+        if (!children) return;
+
+        std::vector<CCNode*> toRemove;
+        for (unsigned int j = 0; j < children->count(); ++j) {
+            auto node = typeinfo_cast<CCNode*>(children->objectAtIndex(j));
+            if (node && node->getTag() == kGhostTag) toRemove.push_back(node);
+        }
+        for (auto n : toRemove) n->removeFromParent();
+    }
+
     void captureLabelSnapshot() {
         auto& prev = m_fields->prevLabel;
         prev.clear();
-        if (!m_textLabel) return;
-        GLubyte fullOp = m_textLabel->getOpacity();
+        auto label = activeLabel();
+        if (!label) return;
+        GLubyte fullOp = activeLabelOpacity();
         size_t len = m_fields->prevString.size();
         prev.reserve(len);
         for (size_t i = 0; i < len; ++i) {
-            auto sprite = typeinfo_cast<CCSprite*>(
-                m_textLabel->getChildByTag(static_cast<int>(i)));
+            auto sprite = glyphAtRawIndex(m_fields->prevString, i);
             if (!sprite) {
                 prev.push_back({});
                 continue;
             }
+            auto spriteParent = sprite->getParent();
             prev.push_back({
                 sprite->getTexture(),
                 sprite->getTextureRect(),
-                sprite->getPosition(),
+                spriteParent
+                    ? spriteParent->convertToWorldSpace(sprite->getPosition())
+                    : sprite->convertToWorldSpace(CCPointZero),
                 sprite->getAnchorPoint(),
                 sprite->getScaleX(),
                 sprite->getScaleY(),
@@ -58,31 +108,22 @@ class $modify(CharFadeInput, CCTextInputNode) {
     }
 
     void purgeGhosts() {
-        if (!m_textLabel) return;
-        auto parent = m_textLabel->getParent();
-        if (!parent) return;
-        auto children = parent->getChildren();
-        if (!children) return;
-        std::vector<CCNode*> toRemove;
-        for (unsigned int j = 0; j < children->count(); ++j) {
-            auto node = typeinfo_cast<CCNode*>(children->objectAtIndex(j));
-            if (node && node->getTag() == kGhostTag) toRemove.push_back(node);
-        }
-        for (auto n : toRemove) n->removeFromParent();
+        purgeGhostsFromParent(m_textLabel ? m_textLabel->getParent() : nullptr);
+        purgeGhostsFromParent(m_textArea && m_textArea->m_label ? m_textArea->m_label->getParent() : nullptr);
     }
 
     void fadeInRange(size_t start, size_t end) {
-        if (start >= end || !m_textLabel) return;
+        if (start >= end || !activeLabel()) return;
 
         float dur = fadeInDuration();
         auto popSettings = popInSettings();
         auto now = std::chrono::steady_clock::now();
+        auto const& text = m_fields->prevString;
 
         if (m_fields->pending.size() < end) m_fields->pending.resize(end);
 
         for (size_t i = start; i < end; ++i) {
-            auto sprite = typeinfo_cast<CCSprite*>(
-                m_textLabel->getChildByTag(static_cast<int>(i)));
+            auto sprite = glyphAtRawIndex(text, i);
             if (!sprite) continue;
 
             sprite->stopActionByTag(kFadeInTag);
@@ -112,12 +153,11 @@ class $modify(CharFadeInput, CCTextInputNode) {
     }
 
     void continueFade(size_t idx) {
-        if (!m_textLabel || idx >= m_fields->pending.size()) return;
+        if (!activeLabel() || idx >= m_fields->pending.size()) return;
         auto& slot = m_fields->pending[idx];
         if (!slot) return;
 
-        auto sprite = typeinfo_cast<CCSprite*>(
-            m_textLabel->getChildByTag(static_cast<int>(idx)));
+        auto sprite = glyphAtRawIndex(m_fields->prevString, idx);
         if (!sprite) { slot = std::nullopt; return; }
 
         float elapsed = std::chrono::duration<float>(
@@ -126,7 +166,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         float remaining = slot->duration - elapsed;
         float ratio = elapsed / slot->duration;
-        GLubyte fullOp = m_textLabel->getOpacity();
+        GLubyte fullOp = activeLabelOpacity();
 
         sprite->stopActionByTag(kFadeInTag);
         sprite->setOpacity(static_cast<GLubyte>(ratio * fullOp));
@@ -148,14 +188,15 @@ class $modify(CharFadeInput, CCTextInputNode) {
     }
 
     void fadeOutGhosts(std::vector<Ghost> const& ghosts) {
-        if (ghosts.empty() || !m_textLabel) return;
-        auto parent = m_textLabel->getParent();
+        auto label = activeLabel();
+        if (ghosts.empty() || !label) return;
+        auto parent = label->getParent();
         if (!parent) return;
 
-        float lblScaleX = m_textLabel->getScaleX();
-        float lblScaleY = m_textLabel->getScaleY();
-        float lblRot    = m_textLabel->getRotation();
-        int   zOrder    = m_textLabel->getZOrder();
+        float lblScaleX = label->getScaleX();
+        float lblScaleY = label->getScaleY();
+        float lblRot    = label->getRotation();
+        int   zOrder    = label->getZOrder();
 
         float dur = fadeOutDuration();
         auto popSettings = popOutSettings();
@@ -165,8 +206,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
             auto s = CCSprite::createWithTexture(g.tex, g.rect);
             if (!s) continue;
 
-            CCPoint world = m_textLabel->convertToWorldSpace(g.pos);
-            s->setPosition(parent->convertToNodeSpace(world));
+            s->setPosition(parent->convertToNodeSpace(g.pos));
             s->setAnchorPoint(g.anchor);
             s->setScaleX(g.scaleX * lblScaleX);
             s->setScaleY(g.scaleY * lblScaleY);
