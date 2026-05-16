@@ -120,7 +120,7 @@ class $modify(CharFadeInput, CCTextInputNode) {
         auto now = std::chrono::steady_clock::now();
         auto const& text = m_fields->prevString;
 
-        if (m_fields->pending.size() < end) m_fields->pending.resize(end);
+        // if (m_fields->pending.size() < end) m_fields->pending.resize(end);
 
         for (size_t i = start; i < end; ++i) {
             auto sprite = glyphAtRawIndex(text, i);
