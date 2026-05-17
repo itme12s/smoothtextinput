@@ -307,4 +307,8 @@ class $modify(CharFadeInput, CCTextInputNode) {
 
         captureLabelSnapshot();
     }
+
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("cocos2d::CCTextInputNode::refreshLabel", 6767);
+    }
 };
