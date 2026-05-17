@@ -77,12 +77,21 @@ class $modify(CharFadeInput, CCTextInputNode) {
         GLubyte fullOp = activeLabelOpacity();
         size_t len = m_fields->prevString.size();
         prev.reserve(len);
+        unsigned int charCount = (m_textArea && m_textArea->m_label && m_textArea->m_label->m_characters)
+            ? m_textArea->m_label->m_characters->count()
+            : 0;
+        log::info("snapshot len={} textArea={} count={}",
+            len, fmt::ptr(m_textArea), charCount);
         for (size_t i = 0; i < len; ++i) {
             auto sprite = glyphAtRawIndex(m_fields->prevString, i);
             if (!sprite) {
+                log::info("snapshot idx={} sprite=NULL", i);
                 prev.push_back({});
                 continue;
             }
+            log::info("snapshot idx={} sprite={} op={} pos=({:.1f},{:.1f})",
+                i, fmt::ptr(sprite), sprite->getOpacity(),
+                sprite->getPosition().x, sprite->getPosition().y);
             auto spriteParent = sprite->getParent();
             prev.push_back({
                 sprite->getTexture(),
@@ -149,6 +158,14 @@ class $modify(CharFadeInput, CCTextInputNode) {
             sprite->runAction(action);
 
             m_fields->pending[i] = PendingFade{now, dur, motion};
+
+            unsigned int charCount = (m_textArea && m_textArea->m_label && m_textArea->m_label->m_characters)
+                ? m_textArea->m_label->m_characters->count()
+                : 0;
+            log::info("fadeIn idx={} sprite={} op={} pos=({:.1f},{:.1f}) textArea={} count={}",
+                i, fmt::ptr(sprite), sprite->getOpacity(),
+                sprite->getPosition().x, sprite->getPosition().y,
+                fmt::ptr(m_textArea), charCount);
         }
     }
 
@@ -237,6 +254,9 @@ class $modify(CharFadeInput, CCTextInputNode) {
     }
 
     void refreshLabel() {
+        log::info("refreshLabel selected={} extUpd={} prev=\"{}\" cur=\"{}\"",
+            m_selected, m_fields->externalUpdate,
+            m_fields->prevString, m_textField ? std::string(m_textField->getString()) : std::string("<null>"));
         if (m_fields->externalUpdate) {
             purgeGhosts();
             plainRefresh();
